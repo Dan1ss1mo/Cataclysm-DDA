@@ -310,6 +310,20 @@
   },
   {
     "type": "mutation",
+    "id": "NO_LEGS",
+    "name": { "str": "No Legs" },
+    "points": 0,
+    "valid": false,
+    "purifiable": false,
+    "description": "Wether by a serious accident, birth, defect, or other means, you have lost your legs.  You can hobble around, but will likely need a wheelchair or other means of locomotion to get somewhere far.",
+    "types": [ "LEGS", "RUNNING", "FEET", "SOLES" ],
+    "no_cbm_on_bp": [ "leg_knee_l", "leg_lower_l", "leg_draped_l", "leg_knee_r", "leg_lower_r", "leg_draped_r", "foot_r" ],
+    "restricts_gear": [ "foot_l", "foot_r", "leg_knee_l", "leg_lower_l", "leg_draped_l", "leg_knee_r", "leg_lower_r", "leg_draped_r" ],
+    "cancels": [ "BADKNEES", "STRONGKNEES" ],
+    "enchantments": [ "ENCH_NO_LEGS" ]
+  },
+  {
+    "type": "mutation",
     "id": "BIOLUM0",
     "name": { "str": "Reflex Photophore" },
     "points": -1,
@@ -387,7 +401,7 @@
     "id": "BIOLUM3",
     "name": { "str": "Bioluminescent Flare" },
     "points": 6,
-    "description": "You can spit a wad of bioluminescent goo several meters away.  There it will light up it's surroundings until it dissipates.",
+    "description": "You can spit a wad of bioluminescent goo several meters away.  There it will light up its surroundings until it dissipates.",
     "encumbrance_covered": [ [ "head", 5 ] ],
     "types": [ "BIOLUM" ],
     "prereqs": [ "BIOLUM2" ],
@@ -1181,7 +1195,7 @@
     "id": "MARTIAL_ARTS2",
     "name": { "str": "Self-Defense Classes" },
     "points": 2,
-    "description": "You have taken some self-defense classes at a nearby gym.  You start with your choice of Boxing, Capoeira, Krav Maga, Muay Thai, Ninjutsu, Wing Chun, or Zui Quan.",
+    "description": "You have taken some self-defense classes at a nearby gym.  You start with your choice of Boxing, Kickboxing, Capoeira, Krav Maga, Muay Thai, Ninjutsu, Wing Chun, or Zui Quan.",
     "player_display": false,
     "initial_ma_styles": [
       "style_krav_maga",
@@ -1190,6 +1204,7 @@
       "style_capoeira",
       "style_zui_quan",
       "style_wingchun",
+      "style_kickboxing",
       "style_boxing"
     ],
     "valid": false
@@ -8320,6 +8335,17 @@
   },
   {
     "type": "mutation",
+    "id": "PROF_KICKBOXER",
+    "name": { "str": "Kickboxer" },
+    "points": 0,
+    "description": "You have some training in the art of kickboxing.  It's just boxing with kicks, right?",
+    "valid": false,
+    "initial_ma_styles": [ "style_kickboxing" ],
+    "purifiable": false,
+    "profession": true
+  },
+  {
+    "type": "mutation",
     "id": "PROF_AUTODOC",
     "name": { "str": "Autodoc Specialist" },
     "points": 0,
@@ -9082,7 +9108,7 @@
     "id": "RESISTWARM",
     "name": { "str": "Heat Tolerance" },
     "points": 1,
-    "description": "You fare better than most in warmer climates and are less bothered by hotter temperatures.  Note that while you'll sweat a little less in close proximity to a fire as a result, burns will still hurt just as much.",
+    "description": "You fare better than most in warmer climates and are less bothered by hotter temperatures.  Note that while you it will take more heat and exposure for you to suffer from sunstroke, this will not make dealing with its consequences any easier.",
     "starting_trait": true,
     "changes_to": [ "STRONGER_RESISTWARM" ],
     "types": [ "ACCLIMATIZATION" ],

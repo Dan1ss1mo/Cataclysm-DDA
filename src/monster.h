@@ -181,6 +181,8 @@ class monster : public Creature
         bool made_of( phase_id p ) const; // Returns true if its phase is p
 
         bool shearable() const;
+        bool is_pet() const;
+        bool is_pet_follow() const;
 
         bool avoid_trap( const tripoint &pos, const trap &tr ) const override;
 
@@ -487,7 +489,6 @@ class monster : public Creature
         bool is_electrical() const override;    // true if the monster produces electric radiation
 
         bool is_nether() const override;    // true if the monster is from the nether
-
 
         field_type_id bloodType() const override;
         field_type_id gibType() const override;

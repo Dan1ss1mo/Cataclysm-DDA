@@ -90,6 +90,7 @@ static const itype_id itype_nail( "nail" );
 static const itype_id itype_sheet( "sheet" );
 static const itype_id itype_stick( "stick" );
 static const itype_id itype_string_36( "string_36" );
+static const itype_id itype_wall_wiring( "wall_wiring" );
 
 static const mon_flag_str_id mon_flag_HUMAN( "HUMAN" );
 
@@ -1035,6 +1036,8 @@ void place_construction( std::vector<construction_group_str_id> const &groups )
     for( const auto &it : con.requirements->get_tools() ) {
         player_character.consume_tools( it );
     }
+    player_character.invalidate_crafting_inventory();
+    player_character.invalidate_weight_carried_cache();
     player_character.assign_activity( ACT_BUILD );
     player_character.activity.placement = here.getglobal( pnt );
 }
@@ -1432,7 +1435,7 @@ void construct::done_wiring( const tripoint_bub_ms &p, Character &/*who*/ )
 {
     get_map().partial_con_remove( p );
 
-    place_appliance( p.raw(), vpart_from_item( STATIC( itype_id( "wall_wiring" ) ) ) );
+    place_appliance( p.raw(), vpart_from_item( itype_wall_wiring ) );
 }
 
 void construct::done_appliance( const tripoint_bub_ms &p, Character & )

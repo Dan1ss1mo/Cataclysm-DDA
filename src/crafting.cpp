@@ -352,10 +352,11 @@ bool Character::has_morale_to_craft() const
     return get_morale_level() >= -50;
 }
 
-void Character::craft( const std::optional<tripoint> &loc, const recipe_id &goto_recipe )
+void Character::craft( const std::optional<tripoint> &loc, const recipe_id &goto_recipe,
+                       const std::string &filterstring )
 {
     int batch_size = 0;
-    const recipe *rec = select_crafting_recipe( batch_size, goto_recipe, *this );
+    const recipe *rec = select_crafting_recipe( batch_size, goto_recipe, *this, filterstring );
     if( rec ) {
         std::string reason;
         if( is_npc() && !rec->npc_can_craft( reason ) ) {
@@ -1454,7 +1455,6 @@ void Character::complete_craft( item &craft, const std::optional<tripoint> &loc 
         bool allow_wield = newits.size() == 1;
         spawn_items( *this, newits, loc, relative_rot, should_heat, allow_wield );
     }
-
 
     // messages, learning of recipe
     if( !making.is_practice() && ( !newits.empty() || !making.result_eocs.empty() ) ) {
@@ -3024,6 +3024,16 @@ item_location npc::get_item_to_craft()
                 }
             }
         }
+        if( const std::optional<vpart_reference> vp = here.veh_at( adj ).cargo() ) {
+            for( item &itm : vp->items() ) {
+                if( itm.get_var( "crafter", "" ) == name ) {
+                    to_craft = item_location( vehicle_cursor( vp->vehicle(), vp->part_index() ), &itm );
+                    if( !is_anyone_crafting( to_craft, this ) ) {
+                        return to_craft;
+                    }
+                }
+            }
+        }
     }
     return to_craft;
 }
@@ -3053,6 +3063,16 @@ void npc::do_npc_craft( const std::optional<tripoint> &loc, const recipe_id &got
                 item_location to_craft = item_location( map_cursor( adj ), &itm );
                 if( !is_anyone_crafting( to_craft, this ) ) {
                     craft_item_list.push_back( to_craft );
+                }
+            }
+        }
+        if( const std::optional<vpart_reference> vp = here.veh_at( adj ).cargo() ) {
+            for( item &itm : vp->items() ) {
+                if( itm.is_craft() && itm.get_making().npc_can_craft( dummy ) ) {
+                    item_location to_craft = item_location( vehicle_cursor( vp->vehicle(), vp->part_index() ), &itm );
+                    if( !is_anyone_crafting( to_craft, this ) ) {
+                        craft_item_list.push_back( to_craft );
+                    }
                 }
             }
         }

@@ -104,6 +104,7 @@ static const efftype_id effect_no_sight( "no_sight" );
 static const efftype_id effect_onfire( "onfire" );
 static const efftype_id effect_pacified( "pacified" );
 static const efftype_id effect_paralyzepoison( "paralyzepoison" );
+static const efftype_id effect_pet( "pet" );
 static const efftype_id effect_photophobia( "photophobia" );
 static const efftype_id effect_poison( "poison" );
 static const efftype_id effect_ridden( "ridden" );
@@ -177,6 +178,7 @@ static const mon_flag_str_id mon_flag_NO_BREED( "NO_BREED" );
 static const mon_flag_str_id mon_flag_NO_FUNG_DMG( "NO_FUNG_DMG" );
 static const mon_flag_str_id mon_flag_PARALYZEVENOM( "PARALYZEVENOM" );
 static const mon_flag_str_id mon_flag_PET_MOUNTABLE( "PET_MOUNTABLE" );
+static const mon_flag_str_id mon_flag_PET_WONT_FOLLOW( "PET_WONT_FOLLOW" );
 static const mon_flag_str_id mon_flag_PHOTOPHOBIC( "PHOTOPHOBIC" );
 static const mon_flag_str_id mon_flag_PLASTIC( "PLASTIC" );
 static const mon_flag_str_id mon_flag_QUEEN( "QUEEN" );
@@ -1281,6 +1283,16 @@ bool monster::shearable() const
 bool monster::made_of( phase_id p ) const
 {
     return type->phase == p;
+}
+
+bool monster::is_pet() const
+{
+    return friendly == -1 && has_effect( effect_pet );
+}
+
+bool monster::is_pet_follow() const
+{
+    return is_pet() && !has_flag( mon_flag_PET_WONT_FOLLOW );
 }
 
 std::vector<material_id> monster::get_absorb_material() const
@@ -2755,9 +2767,6 @@ void monster::die( Creature *nkiller )
         set_hp( current_hp );
     }
 
-
-
-
     item_location corpse;
     // drop a corpse, or not - this needs to happen after the spell, for e.g. revivification effects
     switch( type->mdeath_effect.corpse_type ) {
@@ -2786,7 +2795,6 @@ void monster::die( Creature *nkiller )
             add_item( item( "snare_trigger", calendar::turn_zero ) );
         }
     }
-
 
     if( death_drops && !no_extra_death_drops ) {
         drop_items_on_death( corpse.get_item() );
@@ -3162,10 +3170,8 @@ void monster::process_effects()
             if( mon && mon != this && mon->faction->attitude( faction ) != MFA_FRIENDLY &&
                 !has_effect( effect_spooked ) && morale <= 0 ) {
                 if( !has_effect( effect_spooked_recent ) ) {
-                    if( !has_effect( effect_spooked_recent ) ) {
-                        add_effect( effect_spooked, 3_turns, false );
-                        add_effect( effect_spooked_recent, 9_turns, false );
-                    }
+                    add_effect( effect_spooked, 3_turns, false );
+                    add_effect( effect_spooked_recent, 9_turns, false );
                 } else {
                     if( morale < type->morale ) {
                         morale = type->morale;
@@ -3190,7 +3196,6 @@ void monster::process_effects()
             }
         }
     }
-
 
     if( has_flag( mon_flag_PHOTOPHOBIC ) && get_map().ambient_light_at( pos() ) >= 30.0f ) {
         add_msg_if_player_sees( *this, m_good, _( "The shadow withers in the light!" ), name() );

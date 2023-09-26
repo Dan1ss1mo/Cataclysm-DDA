@@ -65,6 +65,9 @@ class vehicle_part_with_feature_range;
 
 void handbrake();
 
+void practice_athletic_proficiency( Character &p );
+void practice_pilot_proficiencies( Character &p, bool &boating );
+
 namespace catacurses
 {
 class window;
@@ -253,7 +256,6 @@ struct vehicle_part {
         friend class vehicle_stack;
         friend item_location;
         friend class turret_data;
-
 
         // DefaultConstructible, with vpart_id::NULL_ID type and default base item
         vehicle_part();
@@ -1043,6 +1045,9 @@ class vehicle
         bool merge_rackable_vehicle( vehicle *carry_veh, const std::vector<int> &rack_parts );
         // merges vehicles together by copying parts, does not account for any vehicle complexities
         bool merge_vehicle_parts( vehicle *veh );
+        void merge_appliance_into_grid( vehicle &veh_target );
+
+        bool is_powergrid() const;
 
         /**
          * @param handler A class that receives various callbacks, e.g. for placing items.
@@ -1638,6 +1643,9 @@ class vehicle
         bool would_install_prevent_flyable( const vpart_info &vpinfo, const Character &pc ) const;
         bool would_removal_prevent_flyable( const vehicle_part &vp, const Character &pc ) const;
         bool would_repair_prevent_flyable( const vehicle_part &vp, const Character &pc ) const;
+        // Can control this vehicle?
+        bool can_control_in_air( const Character &pc ) const;
+        bool can_control_on_land( const Character &pc ) const;
         /**
          * Traction coefficient of the vehicle.
          * 1.0 on road. Outside roads, depends on mass divided by wheel area
@@ -1897,7 +1905,7 @@ class vehicle
         bool assign_seat( vehicle_part &pt, const npc &who );
 
         // Update the set of occupied points and return a reference to it
-        const std::set<tripoint> &get_points( bool force_refresh = false ) const;
+        const std::set<tripoint> &get_points( bool force_refresh = false, bool no_fake = false ) const;
 
         /**
         * Consumes specified charges (or fewer) from the vehicle part
@@ -2043,7 +2051,7 @@ class vehicle
         // Called by map.cpp to make sure the real position of each zone_data is accurate
         bool refresh_zones();
 
-        bounding_box get_bounding_box( bool use_precalc = true );
+        bounding_box get_bounding_box( bool use_precalc = true, bool no_fake = false );
         // Retroactively pass time spent outside bubble
         // Funnels, solar panels
         void update_time( const time_point &update_to );
@@ -2139,6 +2147,7 @@ class vehicle
         std::vector<int> accessories; // NOLINT(cata-serialize)
         std::vector<int> cable_ports; // NOLINT(cata-serialize)
         std::vector<int> fake_parts; // NOLINT(cata-serialize)
+        std::vector<int> control_req_parts; // NOLINT(cata-serialize)
 
         // config values
         std::string name;   // vehicle name
