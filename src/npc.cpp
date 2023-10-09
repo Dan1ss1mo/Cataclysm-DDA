@@ -1329,7 +1329,8 @@ void npc::starting_weapon( const npc_class_id &type )
             }
         }
 
-        get_event_bus().send<event_type::character_wields_item>( getID(), weapon->typeId() );
+        cata::event e = cata::event::make<event_type::character_wields_item>( getID(), weapon->typeId() );
+        get_event_bus().send_with_talker( this, &weapon, e );
 
         weapon->set_owner( get_faction()->id );
     }
@@ -1564,7 +1565,8 @@ bool npc::wield( item &it )
     }
 
     weapon = get_wielded_item();
-    get_event_bus().send<event_type::character_wields_item>( getID(), weapon->typeId() );
+    cata::event e = cata::event::make<event_type::character_wields_item>( getID(), weapon->typeId() );
+    get_event_bus().send_with_talker( this, &weapon, e );
 
     if( get_player_view().sees( pos() ) ) {
         add_msg_if_npc( m_info, _( "<npcname> wields a %s." ),  weapon->tname() );
@@ -3246,7 +3248,8 @@ void npc::on_load()
 
     map &here = get_map();
     // for spawned npcs
-    if( here.has_flag( ter_furn_flag::TFLAG_UNSTABLE, pos() ) ) {
+    if( here.has_flag( ter_furn_flag::TFLAG_UNSTABLE, pos_bub() ) &&
+        !here.has_vehicle_floor( pos_bub() ) ) {
         add_effect( effect_bouldering, 1_turns,  true );
     } else if( has_effect( effect_bouldering ) ) {
         remove_effect( effect_bouldering );
@@ -3694,6 +3697,26 @@ void npc::set_attitude( npc_attitude new_attitude )
         }
     }
     attitude = new_attitude;
+}
+
+bool npc::theft_witness_compare( const npc *lhs, const npc *rhs )
+{
+    const auto class_score = []( const npc * const guy ) {
+        // Apparently a guard?
+        if( guy->myclass == NC_BOUNTY_HUNTER ) {
+            return 0;
+            // If the guard? doesn't notice, the shopkeep will complain
+            // Because they're probably the person who you have to talk to
+            // and so will ensure the theft is noticed
+        } else if( guy->mission == NPC_MISSION_SHOPKEEP ) {
+            return 1;
+            // Patrolling NPCs more likely to notice/be guards?
+        } else if( guy->mission == NPC_MISSION_GUARD_PATROL ) {
+            return 2;
+        }
+        return 3;
+    };
+    return class_score( lhs ) < class_score( rhs );
 }
 
 npc_follower_rules::npc_follower_rules()

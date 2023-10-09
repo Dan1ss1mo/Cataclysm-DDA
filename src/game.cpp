@@ -216,6 +216,7 @@ static const character_modifier_id character_modifier_slip_prevent_mod( "slip_pr
 
 static const climbing_aid_id climbing_aid_ability_WALL_CLING( "ability_WALL_CLING" );
 static const climbing_aid_id climbing_aid_default( "default" );
+static const climbing_aid_id climbing_aid_furn_CLIMBABLE( "furn_CLIMBABLE" );
 
 static const damage_type_id damage_acid( "acid" );
 static const damage_type_id damage_bash( "bash" );
@@ -5093,7 +5094,7 @@ static bool can_place_monster( const monster &mon, const tripoint &p )
     if( creatures.creature_at<Character>( p ) ) {
         return false;
     }
-    return mon.will_move_to( p );
+    return mon.will_move_to( p ) && mon.know_danger_at( p );
 }
 
 static bool can_place_npc( const tripoint &p )
@@ -5215,7 +5216,7 @@ bool game::find_nearby_spawn_point( const tripoint &target, const mtype_id &mt, 
         target_point = target + tripoint( rng( -max_radius, max_radius ),
                                           rng( -max_radius, max_radius ), 0 );
         if( can_place_monster( monster( mt->id ), target_point ) &&
-            ( open_air_allowed || get_map().has_floor( target_point ) ) &&
+            ( open_air_allowed || get_map().has_floor_or_water( target_point ) ) &&
             ( !outdoor_only || get_map().is_outside( target_point ) ) &&
             ( !indoor_only || !get_map().is_outside( target_point ) ) &&
             rl_dist( target_point, target ) >= min_radius ) {
@@ -5236,7 +5237,7 @@ bool game::find_nearby_spawn_point( const tripoint &target, int min_radius,
         target_point = target + tripoint( rng( -max_radius, max_radius ),
                                           rng( -max_radius, max_radius ), 0 );
         if( can_place_npc( target_point ) &&
-            ( open_air_allowed || get_map().has_floor( target_point ) ) &&
+            ( open_air_allowed || get_map().has_floor_or_water( target_point ) ) &&
             ( !outdoor_only || get_map().is_outside( target_point ) ) &&
             ( !indoor_only || !get_map().is_outside( target_point ) ) &&
             rl_dist( target_point, target ) >= min_radius ) {
@@ -6917,8 +6918,8 @@ void game::zones_manager()
         mgr.cache_avatar_location();
     }
 
-    // get zones on the same z-level, with distance between player and
-    // zone center point <= 50 or all zones, if show_all_zones is true
+    // get zones with distance between player and
+    // zone center point <= 60 or all zones, if show_all_zones is true
     auto get_zones = [&]() {
         std::vector<zone_manager::ref_zone_data> zones;
         if( show_all_zones ) {
@@ -6927,8 +6928,7 @@ void game::zones_manager()
             const tripoint_abs_ms u_abs_pos = u.get_location();
             for( zone_manager::ref_zone_data &ref : mgr.get_zones( zones_faction ) ) {
                 const tripoint_abs_ms &zone_abs_pos = ref.get().get_center_point();
-                if( u_abs_pos.z() == zone_abs_pos.z() &&
-                    rl_dist( u_abs_pos, zone_abs_pos ) <= 50 ) {
+                if( rl_dist( u_abs_pos, zone_abs_pos ) <= ACTIVITY_SEARCH_DISTANCE ) {
                     zones.emplace_back( ref );
                 }
             }
@@ -6951,13 +6951,16 @@ void game::zones_manager()
         if( zone_cnt > 0 ) {
             const zone_data &zone = zones[active_index].get();
 
+            // NOLINTNEXTLINE(cata-use-named-point-constants)
+            mvwprintz( w_zones_options, point( 1, 0 ), c_white, mgr.get_name_from_type( zone.get_type() ) );
+
             if( zone.has_options() ) {
                 const auto &descriptions = zone.get_options().get_descriptions();
 
                 // NOLINTNEXTLINE(cata-use-named-point-constants)
-                mvwprintz( w_zones_options, point( 1, 0 ), c_white, _( "Options" ) );
+                mvwprintz( w_zones_options, point( 1, 1 ), c_white, _( "Options" ) );
 
-                int y = 1;
+                int y = 2;
                 for( const auto &desc : descriptions ) {
                     mvwprintz( w_zones_options, point( 3, y ), c_white, desc.first );
                     mvwprintz( w_zones_options, point( 20, y ), c_white, desc.second );
@@ -7080,11 +7083,7 @@ void game::zones_manager()
                     //Draw Zone name
                     mvwprintz( w_zones, point( 3, iNum - start_index ), colorLine,
                                //~ "P: <Zone Name>" represents a personal zone
-                               trim_by_length( ( zone.get_is_personal() ? _( "P: " ) : "" ) + zone.get_name(), 15 ) );
-
-                    //Draw Type name
-                    mvwprintz( w_zones, point( 20, iNum - start_index ), colorLine,
-                               mgr.get_name_from_type( zone.get_type() ) );
+                               trim_by_length( ( zone.get_is_personal() ? _( "P: " ) : "" ) + zone.get_name(), 28 ) );
 
                     tripoint_abs_ms center = zone.get_center_point();
 
@@ -9087,6 +9086,28 @@ game::vmenu_ret game::list_monsters( const std::vector<Creature *> &monster_list
     return game::vmenu_ret::QUIT;
 }
 
+void game::insert_item( drop_locations &targets )
+{
+    if( targets.empty() || !targets.front().first ) {
+        return;
+    }
+    std::string title = string_format( _( "%s: %s and %d items" ), _( "Insert item" ),
+                                       targets.front().first->tname(), targets.size() - 1 );
+    item_location item_loc = inv_map_splice( [ &, targets]( const item_location & it ) {
+        if( targets.front().first.parent_item() == it ) {
+            return false;
+        }
+        return it->is_container() && !it->is_corpse() && rate_action_insert( u, it ) == hint_rating::good;
+    }, title, 1, _( "You have no container to insert items." ) );
+
+    if( !item_loc ) {
+        add_msg( _( "Never mind." ) );
+        return;
+    }
+
+    u.assign_activity( insert_item_activity_actor( item_loc, targets, true ) );
+}
+
 void game::insert_item()
 {
     item_location item_loc = inv_map_splice( [&]( const item_location & it ) {
@@ -10300,7 +10321,8 @@ bool game::walk_move( const tripoint &dest_loc, const bool via_ramp, const bool 
         }
     }
 
-    const float dest_light_level = get_map().ambient_light_at( dest_loc );
+    const int ramp_adjust = via_ramp ? u.posz() : dest_loc.z;
+    const float dest_light_level = get_map().ambient_light_at( tripoint( dest_loc.xy(), ramp_adjust ) );
 
     // Allow players with nyctophobia to move freely through cloudy and dark tiles
     const float nyctophobia_threshold = LIGHT_AMBIENT_LIT - 3.0f;
@@ -10685,7 +10707,8 @@ point game::place_player( const tripoint &dest_loc, bool quick )
             }
         }
     }
-    if( m.has_flag( ter_furn_flag::TFLAG_UNSTABLE, dest_loc ) && !u.is_mounted() ) {
+    if( m.has_flag( ter_furn_flag::TFLAG_UNSTABLE, dest_loc ) &&
+        !u.is_mounted() && !m.has_vehicle_floor( dest_loc ) ) {
         u.add_effect( effect_bouldering, 1_turns, true );
     } else if( u.has_effect( effect_bouldering ) ) {
         u.remove_effect( effect_bouldering );
@@ -11104,7 +11127,7 @@ bool game::phasing_move( const tripoint &dest_loc, const bool via_ramp )
 bool game::can_move_furniture( tripoint fdest, const tripoint &dp )
 {
     const bool pulling_furniture = dp.xy() == -u.grab_point.xy();
-    const bool has_floor = m.has_floor( fdest );
+    const bool has_floor = m.has_floor_or_water( fdest );
     creature_tracker &creatures = get_creature_tracker();
     bool is_ramp_or_road = m.has_flag( ter_furn_flag::TFLAG_RAMP_DOWN, fdest ) ||
                            m.has_flag( ter_furn_flag::TFLAG_RAMP_UP, fdest ) ||
@@ -11344,7 +11367,7 @@ bool game::grabbed_furn_move( const tripoint &dp )
         }
     }
 
-    if( !m.has_floor( fdest ) && !m.has_flag( ter_furn_flag::TFLAG_FLAT, fdest ) ) {
+    if( !m.has_floor_or_water( fdest ) && !m.has_flag( ter_furn_flag::TFLAG_FLAT, fdest ) ) {
         std::string danger_tile = enumerate_as_string( get_dangerous_tile( fdest ) );
         add_msg( _( "You let go of the %1$s as it falls down the %2$s." ), furntype.name(), danger_tile );
         u.grab( object_type::NONE );
@@ -11800,7 +11823,7 @@ void game::vertical_move( int movez, bool force, bool peeking )
         } else {
             // TODO: Make it an extended action
             climbing = true;
-            climbing_aid = climbing_aid_default;
+            climbing_aid = climbing_aid_furn_CLIMBABLE;
             u.set_activity_level( EXTRA_EXERCISE );
             move_cost = cost == 0 ? 1000 : cost + 500;
 
@@ -11813,7 +11836,7 @@ void game::vertical_move( int movez, bool force, bool peeking )
     }
 
     if( !force && movez == -1 && !here.has_flag( ter_furn_flag::TFLAG_GOES_DOWN, u.pos() ) &&
-        !u.is_underwater() ) {
+        !u.is_underwater() && !here.has_flag( ter_furn_flag::TFLAG_NO_FLOOR_WATER, u.pos() ) ) {
         if( wall_cling && !here.has_floor_or_support( u.pos() ) ) {
             climbing = true;
             climbing_aid = climbing_aid_ability_WALL_CLING;
@@ -13363,7 +13386,7 @@ void game::climb_down_using( const tripoint &examp, climbing_aid_id aid_id, bool
     if( !seems_perfectly_safe ) {
         std::string hint_fall_damage;
         if( damage_estimate >= 100 ) {
-            hint_fall_damage = _( "Falling <color_pink>would kill you</color>" );
+            hint_fall_damage = _( "Falling <color_pink>would kill you</color>." );
         } else if( damage_estimate >= 60 ) {
             hint_fall_damage = _( "Falling <color_pink>could cripple or kill you</color>." );
         } else if( damage_estimate >= 30 ) {
@@ -13373,7 +13396,7 @@ void game::climb_down_using( const tripoint &examp, climbing_aid_id aid_id, bool
         } else if( damage_estimate >= 5 ) {
             hint_fall_damage = _( "Falling <color_red>would hurt</color>." );
         } else {
-            hint_fall_damage = _( "Falling <color_green>wouldn't hurt much<color>." );
+            hint_fall_damage = _( "Falling <color_green>wouldn't hurt much</color>." );
         }
         query += "\n";
         query += hint_fall_damage;
@@ -13412,7 +13435,7 @@ void game::climb_down_using( const tripoint &examp, climbing_aid_id aid_id, bool
     if( !aid.down.confirm_text.empty() ) {
         query_prompt = aid.down.confirm_text.translated();
     }
-    query += "\n";
+    query += "\n\n";
     query += query_prompt;
 
     add_msg_debug( debugmode::DF_GAME, "Generated climb_down prompt for the player." );

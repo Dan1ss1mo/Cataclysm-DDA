@@ -1064,7 +1064,7 @@ class npc : public Character
         void handle_sound( sounds::sound_t priority, const std::string &description,
                            int heard_volume, const tripoint &spos );
 
-        void witness_thievery( item *it );
+        void witness_thievery( item *it ) override;
 
         /* shift() works much like monster::shift(), and is called when the player moves
          * from one submap to an adjacent submap.  It updates our position (shifting by
@@ -1377,6 +1377,10 @@ class npc : public Character
         bool get_known_to_u() const;
 
         void set_known_to_u( bool known );
+
+        // Comparator between two NPCs as to who is a better person to respond
+        // to a theft being witnessed
+        static bool theft_witness_compare( const npc *lhs, const npc *rhs );
 
         /// Set up (start) a companion mission.
         void set_companion_mission( npc &p, const mission_id &miss_id );
