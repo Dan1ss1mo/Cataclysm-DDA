@@ -13,7 +13,7 @@
 
 #include "calendar.h"
 #include "character_id.h"
-#include "coordinates.h"
+#include "coords_fwd.h"
 #include "dialogue.h"
 #include "enums.h"
 #include "game_constants.h"
@@ -101,7 +101,6 @@ struct mission_place {
  */
 struct mission_start {
     static void standard( mission * );           // Standard for its goal type
-    static void place_zombie_mom( mission * );   // Put a zombie mom in a house!
     static void kill_nemesis( mission * );       // Kill the nemesis spawned with the "hunted" trait
     static void place_npc_software( mission * ); // Put NPC-type-dependent software
     static void place_deposit_box( mission * );  // Place a safe deposit box in a nearby bank
@@ -202,7 +201,7 @@ struct mission_type {
         bool has_generic_rewards = true;
 
         // A limited subset of the talk_effects on the mission
-        std::vector<std::pair<int, itype_id>> likely_rewards;
+        talk_effect_fun_t::likely_rewards_t likely_rewards;
 
         // Points of origin
         std::vector<mission_origin> origins;
@@ -213,7 +212,7 @@ struct mission_type {
         bool invisible_on_complete = false;
         itype_id empty_container = itype_id::NULL_ID();
         int item_count = 1;
-        npc_class_id recruit_class = npc_class_id( "NC_NONE" );  // The type of NPC you are to recruit
+        npc_class_id recruit_class = npc_class_id::NULL_ID();  // The type of NPC you are to recruit
         character_id target_npc_id;
         mtype_id monster_type = mtype_id::NULL_ID();
         species_id monster_species;
@@ -261,7 +260,8 @@ struct mission_type {
         static void finalize();
         static void check_consistency();
 
-        bool parse_funcs( const JsonObject &jo, std::function<void( mission * )> &phase_func );
+        bool parse_funcs( const JsonObject &jo, std::string_view src,
+                          std::function<void( mission * )> &phase_func );
         void load( const JsonObject &jo, const std::string &src );
 
         /**
@@ -350,7 +350,7 @@ class mission
         int get_id() const;
         const itype_id &get_item_id() const;
         character_id get_npc_id() const;
-        const std::vector<std::pair<int, itype_id>> &get_likely_rewards() const;
+        const talk_effect_fun_t::likely_rewards_t &get_likely_rewards() const;
         bool has_generic_rewards() const;
         void register_kill_needed() {
             monster_kill_goal++;

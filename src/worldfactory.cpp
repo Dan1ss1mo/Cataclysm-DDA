@@ -2,12 +2,12 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdio>
-#include <cstdlib>
+#include <charconv>
+#include <ctime>
+#include <exception>
 #include <iterator>
 #include <memory>
 #include <set>
-#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -19,17 +19,17 @@
 #include "debug.h"
 #include "enums.h"
 #include "filesystem.h"
-#include "input.h"
+#include "input_context.h"
 #include "json.h"
 #include "json_loader.h"
 #include "mod_manager.h"
-#include "name.h"
 #include "output.h"
 #include "path_info.h"
 #include "point.h"
 #include "sounds.h"
 #include "string_formatter.h"
 #include "string_input_popup.h"
+#include "text_snippets.h"
 #include "translations.h"
 #include "ui.h"
 #include "ui_manager.h"
@@ -67,9 +67,7 @@ save_t save_t::from_base_path( const std::string &base_path )
 
 static std::string get_next_valid_worldname()
 {
-    std::string worldname = Name::get( nameFlags::IsWorldName );
-
-    return worldname;
+    return SNIPPET.expand( "<world_name>" );
 }
 
 WORLD::WORLD()
@@ -148,13 +146,18 @@ WORLD *worldfactory::make_new_world( const std::vector<mod_id> &mods )
 {
     std::unique_ptr<WORLD> retworld = std::make_unique<WORLD>();
     retworld->active_mod_order = mods;
+    retworld->create_timestamp();
     return add_world( std::move( retworld ) );
 }
 
 WORLD *worldfactory::make_new_world( const std::string &name, const std::vector<mod_id> &mods )
 {
+    if( !is_lexically_valid( fs::u8path( name ) ) ) {
+        return nullptr;
+    }
     std::unique_ptr<WORLD> retworld = std::make_unique<WORLD>( name );
     retworld->active_mod_order = mods;
+    retworld->create_timestamp();
     return add_world( std::move( retworld ) );
 }
 
@@ -176,6 +179,8 @@ WORLD *worldfactory::make_new_world( bool show_prompt, const std::string &world_
             return nullptr;
         }
     }
+
+    retworld->create_timestamp();
 
     return add_world( std::move( retworld ) );
 }
@@ -274,6 +279,8 @@ WORLD *worldfactory::make_new_world( special_game_type special_type )
 
     special_world->WORLD_OPTIONS["WORLD_END"].setValue( "delete" );
 
+    special_world->create_timestamp();
+
     if( !special_world->save() ) {
         return nullptr;
     }
@@ -294,8 +301,13 @@ void worldfactory::set_active_world( WORLD *world )
 bool WORLD::save( const bool is_conversion ) const
 {
     if( !assure_dir_exist( folder_path() ) ) {
+        debugmsg( "Unable to create or open world[%s] directory for saving", world_name );
         DebugLog( D_ERROR, DC_ALL ) << "Unable to create or open world[" << world_name <<
                                     "] directory for saving";
+        return false;
+    }
+
+    if( !save_timestamp() ) {
         return false;
     }
 
@@ -364,6 +376,15 @@ void worldfactory::init()
         all_worlds[worldname] = std::make_unique<WORLD>();
         // give the world a name
         all_worlds[worldname]->world_name = worldname;
+
+        bool save = false;
+
+        // load timestamp or create for legacy world
+        if( !all_worlds[worldname]->load_timestamp() ) {
+            all_worlds[worldname]->create_timestamp();
+            save = true;
+        }
+
         // add sav files
         for( auto &world_sav_file : world_sav_files ) {
             all_worlds[worldname]->world_saves.push_back( save_t::from_base_path( world_sav_file ) );
@@ -374,6 +395,10 @@ void worldfactory::init()
         if( !all_worlds[worldname]->load_options() ) {
             all_worlds[worldname]->WORLD_OPTIONS = get_options().get_world_defaults();
             all_worlds[worldname]->WORLD_OPTIONS["WORLD_END"].setValue( "delete" );
+            save = true;
+        }
+
+        if( save ) {
             all_worlds[worldname]->save();
         }
     };
@@ -406,7 +431,7 @@ void worldfactory::init()
             for( auto &origin_file : get_files_from_path( ".", origin_path, false ) ) {
                 std::string filename = origin_file.substr( origin_file.find_last_of( "/\\" ) );
 
-                if( rename( origin_file.c_str(), ( newworld->folder_path() + filename ).c_str() ) ) {
+                if( rename_file( origin_file, ( newworld->folder_path() + filename ) ) ) {
                     debugmsg( "Error while moving world files: %s.  World may have been corrupted",
                               strerror( errno ) );
                 }
@@ -712,10 +737,16 @@ void worldfactory::load_last_world_info()
         return;
     }
 
-    JsonValue jsin = json_loader::from_path( lastworld_path );
-    JsonObject data = jsin.get_object();
-    last_world_name = data.get_string( "world_name" );
-    last_character_name = data.get_string( "character_name" );
+    try {
+        JsonValue jsin = json_loader::from_path( lastworld_path );
+        JsonObject data = jsin.get_object();
+        last_world_name = data.get_string( "world_name" );
+        last_character_name = data.get_string( "character_name" );
+    } catch( std::exception const &e ) {
+        DebugLog( D_INFO, DC_ALL ) <<  e.what();
+        last_world_name = std::string{};
+        last_character_name = std::string{};
+    }
 }
 
 void worldfactory::save_last_world_info() const
@@ -1073,15 +1104,14 @@ int worldfactory::show_worldgen_tab_modselection( const catacurses::window &win,
         std::string id;
         std::vector<mod_id> mods;
         std::vector<mod_id> mods_unfiltered;
+
+        explicit mod_tab( std::string id, std::vector<mod_id> mods, std::vector<mod_id> mods_unfiltered ) :
+            id( std::move( id ) ), mods( std::move( mods ) ), mods_unfiltered( std::move( mods_unfiltered ) ) {}
     };
     std::vector<mod_tab> all_tabs;
 
     for( const std::pair<std::string, translation> &tab : get_mod_list_tabs() ) {
-        all_tabs.push_back( {
-            tab.first,
-            std::vector<mod_id>(),
-            std::vector<mod_id>()
-        } );
+        all_tabs.emplace_back( tab.first, std::vector<mod_id> {}, std::vector<mod_id> {} );
     }
 
     const std::map<std::string, std::string> &cat_tab_map = get_mod_list_cat_tab();
@@ -1955,6 +1985,67 @@ bool worldfactory::valid_worldname( const std::string &name, bool automated ) co
         popup( msg, PF_GET_KEY );
     }
     return false;
+}
+
+bool WORLD::create_timestamp()
+{
+#if defined( TIME_UTC ) && !defined( MACOSX ) && !defined(__ANDROID__)
+    std::timespec t;
+    if( std::timespec_get( &t, TIME_UTC ) != TIME_UTC ) {
+        return false;
+    }
+#else
+    // MinGW-w64 with pthread, MacOS, Android, etc
+    timespec t;
+    if( clock_gettime( CLOCK_REALTIME, &t ) != 0 ) {
+        return false;
+    }
+#endif
+
+    std::array<char, sizeof( "yyyymmddHHMMSS" )> ts;
+    // Using UTC time instead of local time with time zone offset, because %z
+    // returns the localized time zone name instead of the time zone offset on
+    // MinGW-w64, which does not conform to the standard.
+    const std::size_t ts_len = strftime( ts.data(), ts.size(), "%Y%m%d%H%M%S",
+                                         std::gmtime( &t.tv_sec ) );
+    if( !ts_len ) {
+        return false;
+    }
+
+    std::ostringstream str;
+    str.imbue( std::locale::classic() );
+    str << std::string_view( ts.data(), ts_len );
+    str << std::setw( 9 ) << std::setfill( '0' ) << t.tv_nsec;
+    timestamp = str.str();
+    return true;
+}
+
+bool WORLD::save_timestamp() const
+{
+    if( timestamp.empty() ) {
+        return true;
+    }
+
+    const cata_path path = folder_path_path() / PATH_INFO::world_timestamp();
+    return write_to_file( path, [this]( std::ostream & file ) {
+        JsonOut jsout( file );
+        jsout.write( timestamp );
+    }, _( "world timestamp" ) );
+}
+
+bool WORLD::load_timestamp()
+{
+    const cata_path path = folder_path_path() / PATH_INFO::world_timestamp();
+    return read_from_file_optional_json( path, [this]( const JsonValue & jv ) {
+        const std::string ts = jv.get_string();
+        // Sanitize the string since it is used in paths
+        for( const char ch : ts ) {
+            if( ch < '0' || ch > '9' ) {
+                jv.throw_error( "Invalid character encountered in world timestamp." );
+            }
+        }
+        timestamp = ts;
+    } );
 }
 
 void WORLD::load_options( const JsonArray &options_json )

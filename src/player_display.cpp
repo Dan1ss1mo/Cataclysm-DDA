@@ -3,7 +3,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
-#include <functional>
 #include <memory>
 #include <string>
 
@@ -26,9 +25,8 @@
 #include "enum_conversions.h"
 #include "game.h"
 #include "game_inventory.h"
-#include "input.h"
+#include "input_context.h"
 #include "itype.h"
-#include "localized_comparator.h"
 #include "mutation.h"
 #include "options.h"
 #include "output.h"
@@ -41,11 +39,11 @@
 #include "string_formatter.h"
 #include "string_input_popup.h"
 #include "translations.h"
+#include "ui.h"
 #include "ui_manager.h"
 #include "units.h"
 #include "units_utility.h"
 #include "weather.h"
-#include "weather_type.h"
 
 static const bionic_id bio_cqb( "bio_cqb" );
 
@@ -73,9 +71,9 @@ static const std::string title_PROFICIENCIES = translate_marker( "PROFICIENCIES"
 static const unsigned int grid_width = 26;
 
 // Rescale temperature value to one that the player sees
-static int temperature_print_rescaling( int temp )
+static int temperature_print_rescaling( units::temperature temp )
 {
-    return ( temp / 100.0 ) * 2 - 100;
+    return ( units::to_legacy_bodypart_temp( temp ) / 100.0 ) * 2 - 100;
 }
 
 static bool should_combine_bps( const Character &p, const bodypart_id &l, const bodypart_id &r,
@@ -115,26 +113,6 @@ static std::vector<std::pair<bodypart_id, bool>> list_and_combine_bps( const Cha
         }
     }
     return bps;
-}
-
-static std::pair<int, int> subindex_around_cursor(
-    const int num_entries, const int available_space, const int cursor_pos, const bool focused )
-/**
- * Return indexes [start, end) that should be displayed from list long `num_entries`,
- * given that cursor is at position `cursor_pos` and we have `available_space` spaces.
- *
- * Example:
- * num_entries = 6, available_space = 3, cursor_pos = 2, focused = true;
- * so choose 3 from indexes [0, 1, 2, 3, 4, 5]
- * return {1, 4}
- */
-{
-    if( !focused || num_entries <= available_space ) {
-        return { 0, std::min( available_space, num_entries ) };
-    }
-    int slice_start = std::min( std::max( 0, cursor_pos - available_space / 2 ),
-                                num_entries - available_space );
-    return {slice_start, slice_start + available_space };
 }
 
 void Character::print_encumbrance( ui_adaptor &ui, const catacurses::window &win,
@@ -383,7 +361,7 @@ static void draw_proficiencies_info( const catacurses::window &w_info, const uns
         if( cur.known ) {
             progress = _( "You know this proficiency." );
         } else {
-            progress = string_format( _( "You are %2.1f%% of the way towards learning this proficiency." ),
+            progress = string_format( _( "You are %.2f%% of the way towards learning this proficiency." ),
                                       cur.practice * 100 );
             if( debug_mode ) {
                 progress += string_format( "\nYou have spent %s practicing this proficiency.",
@@ -940,11 +918,20 @@ static void draw_skills_info( const catacurses::window &w_info, const Character 
             info_text = string_format( _( "%s\n\nPractical level: %d (%d%%) " ), info_text,
                                        level.level(), level.exercise() );
             if( level.knowledgeLevel() > level.level() ) {
-                info_text = string_format( _( "%s| Learning bonus: %g%%" ), info_text,
+                info_text = string_format( _( "%s| Learning bonus: %.0f%%" ), info_text,
                                            level_gap );
             } else {
-                info_text = string_format( _( "%s| Learning bonus: %g%%" ), info_text,
+                info_text = string_format( _( "%s| Learning bonus: %.0f%%" ), info_text,
                                            learning_bonus );
+            }
+            if( !level.isTraining() ) {
+                info_text = string_format( "%s | %s", info_text,
+                                           _( "<color_yellow>Learning is disabled.</color>" ) );
+            }
+        } else {
+            if( !level.isTraining() ) {
+                info_text = string_format( "%s\n\n%s", info_text,
+                                           _( "<color_yellow>Learning is disabled.</color>" ) );
             }
         }
         draw_x_info( w_info, info_text, info_line );
@@ -958,20 +945,20 @@ static std::vector<speedlist_entry> get_speedlist_entries( const Character &you,
 {
     std::vector<speedlist_entry> entries;
 
-    for( const speed_bonus_effect &effect : you.get_speed_bonus_effects() ) {
-        if( effect.bonus != 0 ) {
-            const speedlist_entry entry { true, effect.description, effect.bonus, false };
-            entries.push_back( entry );
-        }
-    }
-
-    //FIXME I think these are already included above. Need more testing.
     for( const std::pair<const std::string, int> &speed_effect : speed_effects ) {
         if( speed_effect.second != 0 ) {
             const speedlist_entry entry { true, speed_effect.first, speed_effect.second, false };
             entries.push_back( entry );
         }
     }
+
+    for( const speed_bonus_effect &effect : you.get_speed_bonus_effects() ) {
+        if( effect.bonus != 0 && speed_effects.end() == speed_effects.find( effect.description ) ) {
+            const speedlist_entry entry { true, effect.description, effect.bonus, false };
+            entries.push_back( entry );
+        }
+    }
+
 
     float movecost = 100;
     for( const run_cost_effect &effect : you.run_cost_effects( movecost ) ) {
@@ -1165,7 +1152,7 @@ static void on_customize_character( Character &you )
     }
 }
 
-static void change_armor_sprite( avatar &you )
+static void change_armor_sprite( Character &you )
 {
     item_location target_loc;
     target_loc = game_menus::inv::change_sprite( you );
@@ -1181,17 +1168,14 @@ static void change_armor_sprite( avatar &you )
         menu.query();
         if( menu.ret == 0 ) {
             item_location sprite_loc;
-            avatar *you = get_player_character().as_avatar();
             auto armor_filter = [&]( const item & i ) {
                 return i.is_armor();
             };
-            if( you != nullptr ) {
-                sprite_loc = game_menus::inv::titled_filter_menu( armor_filter,
-                             *you,
-                             _( "Select appearance of this armor:" ),
-                             -1,
-                             _( "You have nothing to wear." ) );
-            }
+            sprite_loc = game_menus::inv::titled_filter_menu( armor_filter,
+                         you,
+                         _( "Select appearance of this armor:" ),
+                         -1,
+                         _( "You have nothing to wear." ) );
             if( sprite_loc && sprite_loc.get_item() ) {
                 const item *sprite_item = sprite_loc.get_item();
                 const std::string variant = sprite_item->has_itype_variant() ? sprite_item->itype_variant().id : "";
@@ -1388,9 +1372,7 @@ static bool handle_player_display_action( Character &you, unsigned int &line,
                         }
                         break;
                     case 1:
-                        if( you.is_avatar() ) {
-                            you.as_avatar()->disp_morale();
-                        }
+                        you.disp_morale();
                         break;
                     case 2:
                         ctxt.display_menu();
@@ -1422,10 +1404,12 @@ static bool handle_player_display_action( Character &you, unsigned int &line,
                     you.get_skill_level_object( selectedSkill->ident() ).toggleTraining();
                 }
                 invalidate_tab( curtab );
+                ui_info.invalidate_ui();
                 break;
             }
             case player_display_tab::proficiencies:
-                show_proficiencies_window( you );
+                const std::vector<display_proficiency> profs = you.display_proficiencies();
+                show_proficiencies_window( you, profs[line].id );
                 break;
         }
     } else if( action == "CHANGE_PROFESSION_NAME" ) {
@@ -1442,9 +1426,7 @@ static bool handle_player_display_action( Character &you, unsigned int &line,
         show_proficiencies_window( you );
 
     } else if( action == "morale" ) {
-        if( you.is_avatar() ) {
-            you.as_avatar()->disp_morale( );
-        }
+        you.disp_morale( );
     } else if( action == "VIEW_BODYSTAT" ) {
         display_bodygraph( you );
     } else if( customize_character && action == "SWITCH_GENDER" ) {
@@ -1458,9 +1440,7 @@ static bool handle_player_display_action( Character &you, unsigned int &line,
         ++info_line;
         ui_info.invalidate_ui();
     } else if( action == "MEDICAL_MENU" ) {
-        if( you.is_avatar() ) {
-            you.as_avatar()->disp_medical();
-        }
+        you.disp_medical();
     } else if( action == "SELECT_STATS_TAB" ) {
         invalidate_tab( curtab );
         curtab = player_display_tab::stats;
@@ -1511,9 +1491,7 @@ static bool handle_player_display_action( Character &you, unsigned int &line,
         info_line = 0;
         ui_info.invalidate_ui();
     } else if( action == "CHANGE_ARMOR_SPRITE" ) {
-        if( you.as_avatar() ) {
-            change_armor_sprite( *you.as_avatar() );
-        }
+        change_armor_sprite( you );
     }
     return done;
 }
@@ -1555,7 +1533,7 @@ void Character::disp_info( bool customize_character )
         }
     }
     if( get_perceived_pain() > 0 ) {
-        const stat_mod ppen = get_pain_penalty();
+        const stat_mod ppen = read_pain_penalty();
         std::pair<std::string, nc_color> pain_desc = display::pain_text_color( *this );
         std::string pain_text;
         pain_desc.first = string_format( _( "You are in %s\n" ), pain_desc.first );
@@ -1650,7 +1628,7 @@ void Character::disp_info( bool customize_character )
     const unsigned int proficiency_win_size_y_max = 1 + display_proficiencies().size();
 
     std::vector<trait_and_var> traitslist = get_mutations_variants( false );
-    std::sort( traitslist.begin(), traitslist.end(), trait_display_sort );
+    std::sort( traitslist.begin(), traitslist.end(), trait_var_display_sort );
     const unsigned int trait_win_size_y_max = 1 + traitslist.size();
 
     std::vector<bionic_grouping> bionicslist;

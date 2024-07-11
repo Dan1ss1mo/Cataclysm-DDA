@@ -3,11 +3,11 @@
 #define CATA_SRC_GAME_INVENTORY_H
 
 #include <functional>
-#include <iosfwd>
 #include <list>
 #include <utility>
 
 #include "inventory_ui.h"
+#include "item.h"
 #include "item_location.h"
 #include "type_id.h"
 
@@ -15,7 +15,6 @@ class Character;
 struct tripoint;
 
 class avatar;
-class item;
 class repair_item_actor;
 class salvage_actor;
 
@@ -87,7 +86,11 @@ drop_locations multidrop( Character &you );
  * Otherwise, pick up items from the avatar's current location and all adjacent tiles.
  * @return A list of pairs of item_location, quantity.
  */
+// TODO: Get rid of untyped overload. Restore the target default while doing so (removed
+// to allow profiles to be distinguished.
 drop_locations pickup( avatar &you, const std::optional<tripoint> &target = std::nullopt,
+                       const std::vector<drop_location> &selection = {} );
+drop_locations pickup( avatar &you, const std::optional<tripoint_bub_ms> &target,
                        const std::vector<drop_location> &selection = {} );
 
 drop_locations smoke_food( Character &you, units::volume total_capacity,
@@ -111,12 +114,16 @@ item_location container_for( Character &you, const item &liquid, int radius = 0,
 item_location disassemble( Character &you );
 /** Gunmod installation menu. */
 item_location gun_to_modify( Character &you, const item &gunmod );
+/** Gunmod removal menu. */
+item_location gunmod_to_remove( Character &you, item &gun );
 /** Book reading menu. */
 item_location read( Character &you );
 /** E-Book reading menu. */
 item_location ereader_to_use( Character &you );
 /** eBook reading menu. */
 item_location ebookread( Character &you, item_location &ereader );
+/** Select books to save to E-Book reader menu. */
+drop_locations ebooksave( Character &who, item_location &ereader );
 /** Menu for stealing stuff. */
 item_location steal( avatar &you, Character &victim );
 /** Item activation menu. */
@@ -145,13 +152,16 @@ item_location salvage( Character &you, const salvage_actor *actor );
 /** Repair menu. */
 item_location repair( Character &you, const repair_item_actor *actor, const item *main_tool );
 /** Bionic install menu. */
-item_location install_bionic( Character &you, Character &patient, bool surgeon = false );
+item_location install_bionic( Character &installer, Character &patron, Character &patient,
+                              bool surgeon = false );
 /**Autoclave sterilize menu*/
 item_location sterilize_cbm( Character &you );
 /** Change sprite menu. */
 item_location change_sprite( Character &you );
 /** Unload item menu **/
 std::pair<item_location, bool> unload( Character &you );
+item::reload_option select_ammo( Character &you, const item_location &loc, bool prompt = false,
+                                 bool empty = true );
 /*@}*/
 
 } // namespace inv

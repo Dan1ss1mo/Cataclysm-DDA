@@ -41,6 +41,7 @@
         "fake_dex": 8,
         "fake_per": 10,
         "ranges": [ [ 2, 14, "DEFAULT" ] ],
+        "condition": { "test_eoc": "is_disarmed" },
         "require_targeting_player": false,
         "description": "The deranged agent fires their Five-seveN!"
       }
@@ -58,8 +59,9 @@
       "CAN_OPEN_DOORS",
       "CLIMBS",
       "PUSH_MON",
-      "PATH_AVOID_DANGER_1",
-      "DROPS_AMMO"
+      "PATH_AVOID_DANGER",
+      "DROPS_AMMO",
+      "WIELDED_WEAPON"
     ],
     "armor": { "bash": 4, "cut": 6, "stab": 4, "bullet": 4 }
   }

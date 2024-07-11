@@ -19,7 +19,6 @@
 #include "inventory.h"
 #include "item.h"
 #include "item_location.h"
-#include "item_pocket.h"
 #include "itype.h"
 #include "json.h"
 #include "map_helpers.h"
@@ -126,7 +125,7 @@ static dispersion_sources get_dispersion( npc &shooter, const int aim_time, int 
     item_location gun = shooter.get_wielded_item();
     dispersion_sources dispersion = shooter.get_weapon_dispersion( *gun );
 
-    shooter.moves = aim_time;
+    shooter.set_moves( aim_time );
     shooter.recoil = MAX_RECOIL;
     // Aim as well as possible within the provided time.
     shooter.aim( Target_attributes( range, 0.5, 0.0f, true ) );
@@ -272,7 +271,8 @@ TEST_CASE( "unskilled_shooter_accuracy", "[ranged] [balance] [slow]" )
         test_fast_shooting( shooter, 80, 0.04 );
     }
     SECTION( "an unskilled shooter with a common rifle" ) {
-        arm_shooter( shooter, "ar15" );
+        // carbine is used since ar-15 has no receiver by default
+        arm_shooter( shooter, "modular_m4_carbine" );
         test_shooting_scenario( shooter, 5, 5, 25 );
         test_fast_shooting( shooter, 100, 0.15 );
     }
@@ -313,7 +313,7 @@ TEST_CASE( "competent_shooter_accuracy", "[ranged] [balance]" )
         test_fast_shooting( shooter, 80, 0.3 );
     }
     SECTION( "a skilled shooter with a carbine" ) {
-        arm_shooter( shooter, "m4_carbine", { "red_dot_sight" }, "556_m855a1" );
+        arm_shooter( shooter, "modular_m4_carbine", { "red_dot_sight" }, "556_m855a1" );
         test_shooting_scenario( shooter, 10, 15, 48 );
         test_fast_shooting( shooter, 80, 0.3 );
     }
@@ -354,7 +354,7 @@ TEST_CASE( "expert_shooter_accuracy", "[ranged] [balance]" )
         test_fast_shooting( shooter, 60, 0.5 );
     }
     SECTION( "an expert shooter with an excellent smg" ) {
-        arm_shooter( shooter, "ppsh", { "holo_sight" } );
+        arm_shooter( shooter, "fn_p90", { "holo_sight" } );
         test_shooting_scenario( shooter, 20, 30, 190 );
         test_fast_shooting( shooter, 60, 0.5 );
     }

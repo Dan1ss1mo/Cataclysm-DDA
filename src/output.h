@@ -91,6 +91,31 @@ using chtype = int;
 #define LINE_OXXX_UNICODE 0x252C
 #define LINE_XXXX_UNICODE 0x253C
 
+#if defined(USE_PDCURSES)
+#undef LINE_XOXO
+#undef LINE_OXOX
+#undef LINE_XXOO
+#undef LINE_OXXO
+#undef LINE_OOXX
+#undef LINE_XOOX
+#undef LINE_XXXO
+#undef LINE_XXOX
+#undef LINE_XOXX
+#undef LINE_OXXX
+#undef LINE_XXXX
+
+#define LINE_XOXO LINE_XOXO_UNICODE
+#define LINE_OXOX LINE_OXOX_UNICODE
+#define LINE_XXOO LINE_XXOO_UNICODE
+#define LINE_OXXO LINE_OXXO_UNICODE
+#define LINE_OOXX LINE_OOXX_UNICODE
+#define LINE_XOOX LINE_XOOX_UNICODE
+#define LINE_XXXO LINE_XXXO_UNICODE
+#define LINE_XXOX LINE_XXOX_UNICODE
+#define LINE_XOXX LINE_XOXX_UNICODE
+#define LINE_OXXX LINE_OXXX_UNICODE
+#define LINE_XXXX LINE_XXXX_UNICODE
+#endif
 // Supports line drawing
 std::string string_from_int( catacurses::chtype ch );
 
@@ -596,7 +621,6 @@ std::string rewrite_vsnprintf( const char *msg );
 
 // TODO: move these elsewhere
 // string manipulations.
-void replace_name_tags( std::string &input );
 void replace_city_tag( std::string &input, const std::string &name );
 void replace_keybind_tag( std::string &input );
 
@@ -795,10 +819,10 @@ std::map<std::string, inclusive_rectangle<point>> draw_tabs( const catacurses::w
 // };
 // draw_tabs( w, tabs, current_tab );
 template<typename TabList, typename CurrentTab, typename = std::enable_if_t<
-             std::is_same<CurrentTab,
-                          std::remove_const_t<typename TabList::value_type::first_type>>::value>>
-std::map<CurrentTab, inclusive_rectangle<point>> draw_tabs( const catacurses::window &w,
-        const TabList &tab_list, const CurrentTab &current_tab )
+             std::is_same_v<CurrentTab,
+                            std::remove_const_t<typename TabList::value_type::first_type>>>>
+             std::map<CurrentTab, inclusive_rectangle<point>> draw_tabs( const catacurses::window &w,
+                     const TabList &tab_list, const CurrentTab &current_tab )
 {
     std::vector<std::string> tab_text;
     std::transform( tab_list.begin(), tab_list.end(), std::back_inserter( tab_text ),
@@ -827,10 +851,10 @@ std::map<CurrentTab, inclusive_rectangle<point>> draw_tabs( const catacurses::wi
 // Similar to the above, but where the order of tabs is specified separately
 // TabList is expected to be a map type.
 template<typename TabList, typename TabKeys, typename CurrentTab, typename = std::enable_if_t<
-             std::is_same<CurrentTab,
-                          std::remove_const_t<typename TabList::value_type::first_type>>::value>>
-std::map<CurrentTab, inclusive_rectangle<point>> draw_tabs( const catacurses::window &w,
-        const TabList &tab_list, const TabKeys &keys, const CurrentTab &current_tab )
+             std::is_same_v<CurrentTab,
+                            std::remove_const_t<typename TabList::value_type::first_type>>>>
+             std::map<CurrentTab, inclusive_rectangle<point>> draw_tabs( const catacurses::window &w,
+                     const TabList &tab_list, const TabKeys &keys, const CurrentTab &current_tab )
 {
     std::vector<typename TabList::value_type> ordered_tab_list;
     for( const auto &key : keys ) {
@@ -1055,7 +1079,7 @@ class scrolling_text_view
 class scrollingcombattext
 {
     public:
-        enum : int { iMaxSteps = 8 };
+        static constexpr int iMaxSteps = 8;
 
         scrollingcombattext() = default;
 
@@ -1169,6 +1193,9 @@ int get_terminal_height();
  */
 bool is_draw_tiles_mode();
 
+int get_window_width();
+int get_window_height();
+
 /**
  * Make changes made to the display visible to the user immediately.
  *
@@ -1219,9 +1246,9 @@ class tab_list
 {
     private:
         size_t _index = 0;
-        std::vector<std::string> *_list;
+        const std::vector<std::string> *_list;
     public:
-        explicit tab_list( std::vector<std::string> &_list ) : _list( &_list ) {
+        explicit tab_list( const std::vector<std::string> &_list ) : _list( &_list ) {
         }
 
         void last() {

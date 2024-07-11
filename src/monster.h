@@ -118,9 +118,11 @@ class monster : public Creature
         void try_biosignature();
         void refill_udders();
         void digest_food();
+        void reset_digestion();
         void spawn( const tripoint &p );
         void spawn( const tripoint_abs_ms &loc );
         std::vector<material_id> get_absorb_material() const;
+        std::vector<material_id> get_no_absorb_material() const;
         creature_size get_size() const override;
         units::mass get_weight() const override;
         units::mass weight_capacity() const override;
@@ -160,7 +162,8 @@ class monster : public Creature
 
         std::string extended_description() const override;
         // Inverts color if inv==true
-        bool has_flag( const mon_flag_id &f ) const override; // Returns true if f is set (see mtype.h)
+        // // Returns true if f is set (see mtype.h)
+        bool has_flag( const mon_flag_id &f ) const final;
         // Evaluates monster for both JSON and monster flags (converted to mon_flag_id)
         bool has_flag( flag_id f ) const;
         bool can_see() const;      // MF_SEES and no MF_BLIND
@@ -206,7 +209,9 @@ class monster : public Creature
          * can_move_to() is a wrapper for both of them.
          * know_danger_at() checks for fire, trap etc. (flag PATH_AVOID_)
          */
+        // TODO: Get rid of untyped overload
         bool can_move_to( const tripoint &p ) const;
+        bool can_move_to( const tripoint_bub_ms &p ) const;
         bool can_reach_to( const tripoint &p ) const;
         bool will_move_to( const tripoint &p ) const;
         bool know_danger_at( const tripoint &p ) const;
@@ -426,7 +431,7 @@ class monster : public Creature
 
         float stability_roll() const override;
         // We just dodged an attack from something
-        void on_dodge( Creature *source, float difficulty ) override;
+        void on_dodge( Creature *source, float difficulty, float training_level = 0.0 ) override;
         void on_try_dodge() override {}
         // Something hit us (possibly null source)
         void on_hit( Creature *source, bodypart_id bp_hit,
@@ -453,7 +458,7 @@ class monster : public Creature
 
         void die( Creature *killer ) override; //this is the die from Creature, it calls kill_mo
         void drop_items_on_death( item *corpse );
-        void spawn_dissectables_on_death( item *corpse ); //spawn dissectable CBMs into CORPSE pocket
+        void spawn_dissectables_on_death( item *corpse ) const; //spawn dissectable CBMs into CORPSE pocket
         //spawn monster's inventory without killing it
         void generate_inventory( bool disableDrops = true );
 
@@ -492,7 +497,11 @@ class monster : public Creature
 
         bool is_electrical() const override;    // true if the monster produces electric radiation
 
+        bool is_fae() const override;    // true if the monster is a faerie creature
+
         bool is_nether() const override;    // true if the monster is from the nether
+
+        bool has_mind() const override;    // true if the monster is sapient and capable of reason
 
         field_type_id bloodType() const override;
         field_type_id gibType() const override;
@@ -500,16 +509,11 @@ class monster : public Creature
         using Creature::add_msg_if_npc;
         void add_msg_if_npc( const std::string &msg ) const override;
         void add_msg_if_npc( const game_message_params &params, const std::string &msg ) const override;
-        using Creature::add_msg_debug_if_npc;
-        void add_msg_debug_if_npc( debugmode::debug_filter type, const std::string &msg ) const override;
         using Creature::add_msg_player_or_npc;
         void add_msg_player_or_npc( const std::string &player_msg,
                                     const std::string &npc_msg ) const override;
         void add_msg_player_or_npc( const game_message_params &params, const std::string &player_msg,
                                     const std::string &npc_msg ) const override;
-        using Creature::add_msg_debug_player_or_npc;
-        void add_msg_debug_player_or_npc( debugmode::debug_filter type, const std::string &player_msg,
-                                          const std::string &npc_msg ) const override;
 
         // currently grabbed limbs
         std::unordered_set<bodypart_str_id> grabbed_limbs;
@@ -569,6 +573,8 @@ class monster : public Creature
 
         std::optional<time_point> lastseen_turn;
 
+        pimpl<enchant_cache> enchantment_cache;
+
         // Stair data.
         int staircount = 0;
 
@@ -587,7 +593,6 @@ class monster : public Creature
          * and to reviving monsters that spawn from a corpse.
          */
         void init_from_item( item &itm );
-
         /**
          * Do some cleanup and caching as monster is being unloaded from map.
          */
@@ -601,7 +606,9 @@ class monster : public Creature
         void on_load();
 
         const pathfinding_settings &get_pathfinding_settings() const override;
-        std::set<tripoint> get_path_avoid() const override;
+        std::function<bool( const tripoint & )> get_path_avoid() const override;
+        double calculate_by_enchantment( double modify, enchant_vals::mod value,
+                                         bool round_output = false ) const;
     private:
         void process_trigger( mon_trigger trig, int amount );
         void process_trigger( mon_trigger trig, const std::function<int()> &amount_func );
@@ -623,6 +630,23 @@ class monster : public Creature
         monster_horde_attraction horde_attraction = MHA_NULL;
         /** Found path. Note: Not used by monsters that don't pathfind! **/
         std::vector<tripoint> path;
+
+        // Exponential backoff for stuck monsters. Massively reduces pathfinding CPU.
+        time_point pathfinding_cd = calendar::turn;
+        time_duration pathfinding_backoff = 2_seconds;
+
+        bool can_pathfind() const {
+            return pathfinding_cd <= calendar::turn;
+        }
+        void reset_pathfinding_cd() {
+            pathfinding_cd = calendar::turn;
+            pathfinding_backoff = 2_seconds;
+        }
+        void increment_pathfinding_cd() {
+            pathfinding_cd = calendar::turn + pathfinding_backoff;
+            pathfinding_backoff = std::min( pathfinding_backoff * 2, 10_seconds );
+        }
+
         /** patrol points for monsters that can pathfind and have a patrol route! **/
         std::vector<tripoint_abs_ms> patrol_route;
         int next_patrol_point = -1;

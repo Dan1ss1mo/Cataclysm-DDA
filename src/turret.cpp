@@ -175,10 +175,10 @@ bool turret_data::ammo_select( const itype_id &ammo )
     return true;
 }
 
-std::set<std::string> turret_data::ammo_effects() const
+std::set<ammo_effect_str_id> turret_data::ammo_effects() const
 {
     if( !veh || !part ) {
-        return std::set<std::string>();
+        return std::set<ammo_effect_str_id>();
     }
     auto res = part->base.ammo_effects();
     if( uses_vehicle_tanks_or_batteries() && ammo_data() ) {
@@ -290,7 +290,7 @@ void turret_data::post_fire( Character &you, int shots )
     static const auto clear_mag_wells = []( item & it ) {
         std::vector<item_pocket *> magazine_wells = it.get_contents().get_pockets(
         []( const item_pocket & pocket ) {
-            return pocket.is_type( item_pocket::pocket_type::MAGAZINE_WELL );
+            return pocket.is_type( pocket_type::MAGAZINE_WELL );
         } );
         for( item_pocket *pocket : magazine_wells ) {
             pocket->clear_items();
@@ -431,8 +431,8 @@ bool vehicle::turrets_aim( std::vector<vehicle_part *> &turrets )
         }
 
         ///\EFFECT_INT speeds up aiming of vehicle turrets
-        player_character.moves = std::min( 0,
-                                           player_character.moves - 100 + ( 5 * player_character.int_cur ) );
+        player_character.set_moves( std::min( 0,
+                                              player_character.get_moves() - 100 + ( 5 * player_character.int_cur ) ) );
     }
     return got_target;
 }
@@ -577,6 +577,22 @@ int vehicle::automatic_fire_turret( vehicle_part &pt )
     int shots = 0;
 
     if( gun.query() != turret_data::status::ready ) {
+        return shots;
+    }
+
+    // An automatic turret will not fire if the gun is too hot.
+    double overheat_modifier = 0;
+    float overheat_multiplier = 1.0f;
+    for( const item *mod : gun.base()->gunmods() ) {
+        overheat_modifier += mod->type->gunmod->overheat_threshold_modifier;
+        overheat_multiplier *= mod->type->gunmod->overheat_threshold_multiplier;
+    }
+    double heat = gun.base()->get_var( "gun_heat", 0.0 );
+    double threshold = std::max( ( gun.base()->type->gun->overheat_threshold * overheat_multiplier ) +
+                                 overheat_modifier, 5.0 );
+
+    // Heat is too hot, do not fire. The warning chime will have just started sounding.
+    if( heat > threshold * 0.6 ) {
         return shots;
     }
 

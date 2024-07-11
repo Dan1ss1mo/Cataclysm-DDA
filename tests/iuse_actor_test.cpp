@@ -15,7 +15,6 @@
 #include "game.h"
 #include "item.h"
 #include "item_location.h"
-#include "item_pocket.h"
 #include "itype.h"
 #include "iuse.h"
 #include "iuse_actor.h"
@@ -26,6 +25,7 @@
 #include "monster.h"
 #include "mtype.h"
 #include "player_helpers.h"
+#include "pocket_type.h"
 #include "point.h"
 #include "ret_val.h"
 #include "type_id.h"
@@ -98,8 +98,8 @@ TEST_CASE( "tool_transform_when_activated", "[iuse][tool][transform]" )
         REQUIRE( bat_cell.ammo_remaining() == bat_charges );
 
         // Put battery in flashlight
-        REQUIRE( flashlight.has_pocket_type( item_pocket::pocket_type::MAGAZINE_WELL ) );
-        ret_val<void> result = flashlight.put_in( bat_cell, item_pocket::pocket_type::MAGAZINE_WELL );
+        REQUIRE( flashlight.has_pocket_type( pocket_type::MAGAZINE_WELL ) );
+        ret_val<void> result = flashlight.put_in( bat_cell, pocket_type::MAGAZINE_WELL );
         REQUIRE( result.success() );
         REQUIRE( flashlight.magazine_current() );
 
@@ -136,7 +136,7 @@ static void cut_up_yields( const std::string &target )
     CAPTURE( target );
     salvage_actor test_actor;
     item cut_up_target{ target };
-    item tool{ "knife_butcher" };
+    item tool{ "knife_huge" };
     const std::map<material_id, int> &target_materials = cut_up_target.made_of();
     const float mat_total = cut_up_target.type->mat_portion_total == 0 ? 1 :
                             cut_up_target.type->mat_portion_total;
@@ -151,7 +151,7 @@ static void cut_up_yields( const std::string &target )
 
     units::mass cut_up_target_mass = cut_up_target.weight();
     item &spawned_item = here.add_item_or_charges( guy.pos(), cut_up_target );
-    item_location item_loc( map_cursor( guy.pos() ), &spawned_item );
+    item_location item_loc( map_cursor( guy.pos_bub() ), &spawned_item );
 
     REQUIRE( smallest_yield_mass <= cut_up_target_mass );
 

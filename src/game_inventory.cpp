@@ -19,10 +19,8 @@
 #include "bodypart.h"
 #include "calendar.h"
 #include "cata_utility.h"
-#include "catacharset.h"
 #include "character.h"
 #include "color.h"
-#include "creature_tracker.h"
 #include "cursesdef.h"
 #include "damage.h"
 #include "debug.h"
@@ -31,6 +29,7 @@
 #include "flag.h"
 #include "game.h"
 #include "input.h"
+#include "input_context.h"
 #include "inventory.h"
 #include "inventory_ui.h"
 #include "item.h"
@@ -57,9 +56,8 @@
 #include "units.h"
 #include "units_utility.h"
 #include "value_ptr.h"
-#include "vehicle_selector.h"
+#include "veh_type.h"
 #include "vitamin.h"
-#include "vpart_position.h"
 
 static const activity_id ACT_CONSUME_DRINK_MENU( "ACT_CONSUME_DRINK_MENU" );
 static const activity_id ACT_CONSUME_FOOD_MENU( "ACT_CONSUME_FOOD_MENU" );
@@ -73,6 +71,7 @@ static const flag_id json_flag_CALORIES_INTAKE( "CALORIES_INTAKE" );
 
 static const itype_id itype_fitness_band( "fitness_band" );
 
+static const json_character_flag json_flag_MANUAL_CBM_INSTALLATION( "MANUAL_CBM_INSTALLATION" );
 static const json_character_flag json_flag_PAIN_IMMUNE( "PAIN_IMMUNE" );
 
 static const quality_id qual_ANESTHESIA( "ANESTHESIA" );
@@ -265,7 +264,7 @@ void game_menus::inv::common( avatar &you )
         inv_s.add_character_items( you );
         inv_s.set_filter( filter );
         if( location != item_location::nowhere ) {
-            inv_s.highlight( location );
+            inv_s.highlight_one_of( { location } );
         }
 
         location = inv_s.execute();
@@ -300,7 +299,7 @@ void game_menus::inv::common( item_location &loc, avatar &you )
         inv_s.add_contained_items( loc );
         inv_s.set_filter( filter );
         if( location != item_location::nowhere ) {
-            inv_s.highlight( location );
+            inv_s.highlight_one_of( { location } );
         }
 
         location = inv_s.execute();
@@ -487,13 +486,9 @@ class liquid_inventory_selector_preset : public inventory_selector_preset
             if( location.get_item() == avoid ) {
                 return false;
             }
-            if( location.where() == item_location::type::character ) {
-                Character *character = get_creature_tracker().creature_at<Character>( location.position() );
-                if( character == nullptr ) {
-                    debugmsg( "Invalid location supplied to the liquid filter: no character found." );
-                    return false;
-                }
-                return location->get_remaining_capacity_for_liquid( liquid, *character ) > 0;
+            Character *carrier = location.carrier();
+            if( carrier != nullptr ) {
+                return location->get_remaining_capacity_for_liquid( liquid, *carrier ) > 0;
             }
             const bool allow_buckets = location.where() == item_location::type::map;
             return location->get_remaining_capacity_for_liquid( liquid, allow_buckets ) > 0;
@@ -508,9 +503,9 @@ item_location game_menus::inv::container_for( Character &you, const item &liquid
         const item *const avoid )
 {
     return inv_internal( you, liquid_inventory_selector_preset( liquid, avoid ),
-                         string_format( _( "Container for %s | %s %s" ), liquid.display_name( liquid.charges ),
+                         string_format( _( "Pour %s | %s %s into" ), liquid.display_name( liquid.charges ),
                                         format_volume( liquid.volume() ), volume_units_abbr() ), radius,
-                         string_format( _( "You don't have a suitable container for carrying %s." ),
+                         string_format( _( "You don't have a suitable container to pour %s into." ),
                                         liquid.tname() ) );
 }
 
@@ -521,7 +516,7 @@ class pickup_inventory_preset : public inventory_selector_preset
                                           bool skip_wield_check = false, bool ignore_liquidcont = false ) : you( you ),
             skip_wield_check( skip_wield_check ), ignore_liquidcont( ignore_liquidcont ) {
             save_state = &pickup_sel_default_state;
-            _pk_type = item_pocket::pocket_type::LAST;
+            _pk_type = pocket_type::LAST;
         }
 
         std::string get_denial( const item_location &loc ) const override {
@@ -538,11 +533,13 @@ class pickup_inventory_preset : public inventory_selector_preset
                 } else if( loc->is_frozen_liquid() ) {
                     ret_val<crush_tool_type> can_crush = you.can_crush_frozen_liquid( loc );
 
-                    if( loc->has_flag( flag_SHREDDED ) ) { // NOLINT(bugprone-branch-clone)
-                        return std::string();
-                    } else if( !can_crush.success() ) {
-                        return can_crush.str();
-                    } else if( !you.can_pickVolume_partial( *loc, false, nullptr, false ) ) {
+                    if( you.can_pickVolume_partial( *loc, false, nullptr, false, true ) ) {
+                        if( loc->has_flag( flag_SHREDDED ) ) {// NOLINT(bugprone-branch-clone)
+                            return std::string();
+                        } else if( !can_crush.success() ) {
+                            return can_crush.str();
+                        }
+                    } else {
                         item item_copy( *loc );
                         item_copy.charges = 1;
                         item_copy.set_flag( flag_SHREDDED );
@@ -555,11 +552,11 @@ class pickup_inventory_preset : public inventory_selector_preset
                                                  !ip->front().can_combine( item_copy ) ||
                                                  item_copy.typeId() != ip->front().typeId() ) ) ) {
                             return _( "Does not have any pocket for frozen liquids!" );
+                        } else {
+                            return std::string();
                         }
-                    } else {
-                        return std::string();
                     }
-                } else if( !you.can_pickVolume_partial( *loc, false, nullptr, false ) &&
+                } else if( !you.can_pickVolume_partial( *loc, false, nullptr, false, true ) &&
                            ( skip_wield_check || you.has_wield_conflicts( *loc ) ) ) {
                     return _( "Does not fit in any pocket!" );
                 } else if( !you.can_pickWeight_partial( *loc, !get_option<bool>( "DANGEROUS_PICKUPS" ) ) ) {
@@ -910,7 +907,7 @@ static std::string get_consume_needs_hint( Character &you )
     desc = display::pain_text_color( you );
     hint.append( string_format( "%s %s", _( "Pain:" ), colorize( desc.first, desc.second ) ) );
     hint.append( string_format( " %s ", LINE_XOXO_S ) );
-    desc = display::fatigue_text_color( you );
+    desc = display::sleepiness_text_color( you );
     hint.append( string_format( "%s %s", _( "Rest:" ), colorize( desc.first, desc.second ) ) );
     hint.append( string_format( " %s ", LINE_XOXO_S ) );
     hint.append( string_format( "%s %s", _( "Weight:" ), display::weight_string( you ) ) );
@@ -1259,6 +1256,79 @@ item_location game_menus::inv::gun_to_modify( Character &you, const item &gunmod
                          _( "You don't have any guns to modify." ) );
 }
 
+class gunmod_remove_inventory_preset : public inventory_selector_preset
+{
+    public:
+        gunmod_remove_inventory_preset( const Character &you, const item &gun ) : you( you ), gun( gun ) {
+            append_cell( [this]( const item_location & loc ) {
+                if( !this->you.meets_requirements( *loc.get_item(), this->gun ) ) {
+                    return string_format( "<color_yellow>%s</color>", _( "you lack the skills to reinstall" ) );
+                }
+
+                return string_format( "<color_light_green>%s</color>", _( "always" ) );
+            }, _( "SUCCESS CHANCE" ) );
+        }
+
+        bool is_shown( const item_location &loc ) const override {
+            return loc->is_gunmod() && !loc->is_irremovable();
+        }
+
+        // TODO: Need to represent gun mods with a tree structure
+        // Right now, for example, if there is one sight mod location on a gun, and there
+        // are two mods attached to the gun, both of which use a sight mod location, and add
+        // a sight mod location, both are removable. Ideally one should not be removable, to
+        // represent the mod that has the other mod attached to its added sight mod location.
+        std::string get_denial( const item_location &loc ) const override {
+            item mod = *loc.get_item();
+            if( ( mod.type->gunmod->location.name() == "magazine" ||
+                  mod.type->gunmod->location.name() == "mechanism" ||
+                  mod.type->gunmod->location.name() == "loading port" ||
+                  mod.type->gunmod->location.name() == "bore" ) &&
+                ( gun.ammo_remaining() > 0 || gun.magazine_current() ) ) {
+                return _( "must be unloaded before removing this mod" );
+            }
+
+            if( !loc->type->gunmod->add_mod.empty() ) {
+                std::map<gunmod_location, int> mod_locations_added = loc->type->gunmod->add_mod;
+
+                for( const std::pair<const gunmod_location, int> &slot : mod_locations_added ) {
+                    if( slot.second > 0 && this->gun.get_free_mod_locations( slot.first ) <= 0 ) {
+                        return _( "has mods attached" );
+                    }
+                }
+            }
+
+            return std::string();
+        }
+
+    private:
+        const Character &you;
+        const item &gun;
+};
+
+item_location game_menus::inv::gunmod_to_remove( Character &you, item &gun )
+{
+    const std::string none_message = _( "You don't have any mods to remove." );
+
+    const gunmod_remove_inventory_preset preset( you, gun );
+    inventory_pick_selector inv_s( you, preset );
+
+    inv_s.set_title( _( "Remove which modification?" ) );
+    inv_s.set_display_stats( false );
+
+    inv_s.clear_items();
+    inv_s.add_contained_gunmods( you, gun );
+
+    if( inv_s.empty() ) {
+        popup( none_message, PF_GET_KEY );
+        return item_location();
+    }
+
+    item_location location = inv_s.execute();
+
+    return location;
+}
+
 class ereader_inventory_preset : public pickup_inventory_preset
 {
     public:
@@ -1518,6 +1588,62 @@ item_location game_menus::inv::ebookread( Character &you, item_location &ereader
     return location;
 }
 
+drop_locations game_menus::inv::ebooksave( Character &who, item_location &ereader )
+{
+    std::set<itype_id> already_saved;
+    for( const item *ebook : ereader->ebooks() ) {
+        if( !ebook->is_book() ) {
+            debugmsg( "ebook type pocket contains non-book item %s", ebook->typeId().str() );
+            continue;
+        }
+
+        already_saved.insert( ebook->typeId() );
+    }
+    const inventory_filter_preset preset( [&who, &already_saved]( const item_location & loc ) {
+        return loc->is_book()
+               && loc->type->book->is_scannable
+               && !already_saved.count( loc->typeId() )
+               && loc->is_owned_by( who, true );
+    } );
+
+    const int available_charges = ereader->ammo_remaining();
+    auto make_raw_stats = [&available_charges, &ereader](
+                              const std::vector<std::pair<item_location, int>> &locs
+    ) {
+        std::vector<item_location> books;
+        books.reserve( locs.size() );
+        for( const auto &pair : locs ) {
+            books.push_back( pair.first );
+        }
+        const int required_charges = ebooksave_activity_actor::required_charges( books, ereader );
+        const time_duration required_time = ebooksave_activity_actor::required_time( books );
+        auto int_to_str = []( int val ) -> std::string {
+            return string_format( "%d", val );
+        };
+        const std::string charges = string_join( display_stat( "", required_charges,
+                                    available_charges,
+                                    int_to_str ), "" );
+        const std::string time = colorize( to_string( required_time, true ),
+                                           c_light_gray );
+        using stats = inventory_selector::stats;
+        return stats{{
+                {{ _( "Charges" ), charges }},
+                {{ _( "Estimated time" ), time }}
+            }};
+    };
+
+    inventory_multiselector inv_s( who, preset, _( "SELECT BOOKS TO SCAN" ),
+                                   make_raw_stats, /*allow_select_contained=*/true );
+    inv_s.add_character_items( who );
+    inv_s.add_nearby_items( PICKUP_RANGE );
+    inv_s.set_title( _( "Scan which books?" ) );
+    if( inv_s.empty() ) {
+        popup( std::string( _( "You have no books to scan." ) ), PF_GET_KEY );
+        return drop_locations();
+    }
+    return inv_s.execute();
+}
+
 class steal_inventory_preset : public pickup_inventory_preset
 {
     public:
@@ -1706,27 +1832,15 @@ void game_menus::inv::insert_items( avatar &you, item_location &holster )
 
 static bool valid_unload_container( const item_location &container )
 {
-    // Item must be a container.
-    if( !container->is_container() ) {
-        return false;
-    }
-
-    // Item must be able to be unloaded
-    if( container->has_flag( flag_NO_UNLOAD ) ) {
-        return false;
-    }
-
-    // Container must contain at least one item
-    if( container->empty_container() ) {
-        return false;
-    }
-
-    // Not all contents should not be liquid, gas or plasma
-    if( container->contains_no_solids() ) {
-        return false;
-    }
-
-    return true;
+    return
+        // Item must be a container.
+        container->is_container()
+        // Item must be able to be unloaded
+        && !container->has_flag( flag_NO_UNLOAD )
+        // Container must contain at least one item
+        && !container->empty_container()
+        // Not all contents should not be liquid, gas or plasma
+        && !container->contains_no_solids();
 }
 
 drop_locations game_menus::inv::unload_container( avatar &you )
@@ -1743,7 +1857,7 @@ drop_locations game_menus::inv::unload_container( avatar &you )
 
     drop_locations dropped;
     for( drop_location &droplc : insert_menu.execute() ) {
-        for( item *it : droplc.first->all_items_top( item_pocket::pocket_type::CONTAINER, true ) ) {
+        for( item *it : droplc.first->all_items_top( pocket_type::CONTAINER, true ) ) {
             // no liquids and no items marked as favorite
             if( ( !it->made_of( phase_id::LIQUID ) || ( it->made_of( phase_id::LIQUID ) &&
                     it->is_frozen_liquid() ) ) && !it->is_favorite ) {
@@ -2113,6 +2227,16 @@ drop_locations game_menus::inv::pickup( avatar &you,
     }
 
     return pick_s.execute();
+}
+
+drop_locations game_menus::inv::pickup( avatar &you,
+                                        const std::optional<tripoint_bub_ms> &target, const std::vector<drop_location> &selection )
+{
+    std::optional<tripoint> tmp;
+    if( target.has_value() ) {
+        tmp = target.value().raw();
+    }
+    return game_menus::inv::pickup( you, tmp, selection );
 }
 
 class smokable_selector_preset : public inventory_selector_preset
@@ -2486,7 +2610,8 @@ class bionic_install_preset: public inventory_selector_preset
 
             const bool has_install_program = !install_programs.empty();
 
-            if( get_player_character().has_trait( trait_DEBUG_BIONICS ) ) {
+            if( get_player_character().has_trait( trait_DEBUG_BIONICS ) ||
+                get_player_character().has_flag( json_flag_MANUAL_CBM_INSTALLATION ) ) {
                 chance_of_failure = 0;
             } else {
                 chance_of_failure = 100 - bionic_success_chance( true, has_install_program ? 10 : -1, difficulty,
@@ -2566,7 +2691,8 @@ class bionic_install_surgeon_preset : public inventory_selector_preset
             int chance_of_failure = 100;
             Character &installer = you;
 
-            if( get_player_character().has_trait( trait_DEBUG_BIONICS ) ) {
+            if( get_player_character().has_trait( trait_DEBUG_BIONICS ) ||
+                get_player_character().has_flag( json_flag_MANUAL_CBM_INSTALLATION ) ) {
                 chance_of_failure = 0;
             } else {
                 chance_of_failure = 100 - bionic_success_chance( true, 20, difficulty, installer );
@@ -2580,12 +2706,14 @@ class bionic_install_surgeon_preset : public inventory_selector_preset
         }
 };
 
-item_location game_menus::inv::install_bionic( Character &you, Character &patient, bool surgeon )
+item_location game_menus::inv::install_bionic( Character &installer, Character &patron,
+        Character &patient, bool surgeon )
 {
     if( surgeon ) {
-        return autodoc_internal( you, patient, bionic_install_surgeon_preset( you, patient ), 5, surgeon );
+        return autodoc_internal( patron, patient, bionic_install_surgeon_preset( installer, patient ), 5,
+                                 surgeon );
     } else {
-        return autodoc_internal( you, patient, bionic_install_preset( you, patient ), 5 );
+        return autodoc_internal( patron, patient, bionic_install_preset( installer, patient ), 5 );
     }
 
 }
@@ -2649,4 +2777,180 @@ std::pair<item_location, bool> game_menus::inv::unload( Character &you )
     }
 
     return inv_s.execute();
+}
+
+class select_ammo_inventory_preset : public inventory_selector_preset
+{
+    public:
+        select_ammo_inventory_preset( Character &you, const item_location &target,
+                                      bool empty ) : you( you ),
+            target( target ), empty( empty ) {
+            _indent_entries = false;
+            _collate_entries = true;
+
+            append_cell( [&you]( const item_location & loc ) {
+                bool is_ammo_container = loc->is_ammo_container();
+                Character &player_character = get_player_character();
+                if( is_ammo_container || loc->is_container() ) {
+                    if( is_ammo_container && you.is_worn( *loc ) ) {
+                        return loc->type_name();
+                    }
+                    return string_format( _( "%s, %s" ), loc->type_name(), loc.describe( &player_character ) );
+                }
+                return loc.describe( &player_character );
+            }, _( "LOCATION" ) );
+
+            append_cell( [&you, target]( const item_location & loc ) {
+                for( const item_location &opt : get_possible_reload_targets( target ) ) {
+                    if( opt.can_reload_with( loc, true ) ) {
+                        if( opt == target ) {
+                            return std::string();
+                        }
+                        return string_format( _( "%s, %s" ), opt->type_name(), opt.describe( &you ) );
+                    }
+                }
+                return std::string();
+            }, _( "DESTINATION" ) );
+
+            append_cell( []( const inventory_entry & entry ) {
+                if( entry.any_item()->is_ammo() ) {
+                    return std::to_string( entry.chosen_count );
+                }
+                return std::string();
+            }, _( "AMOUNT" ) );
+
+            append_cell( [&you, &target]( const item_location & loc ) {
+                item::reload_option opt( &you, target, loc );
+                return std::to_string( opt.moves() );
+            }, _( "MOVES" ) );
+
+            append_cell( []( const item_location & loc ) {
+                const itype *ammo = loc->is_ammo_container() ? loc->first_ammo().ammo_data() :
+                                    loc->ammo_data();
+                if( ammo ) {
+                    const damage_instance &dam = ammo->ammo->damage;
+                    return std::to_string( static_cast<int>( dam.total_damage() ) );
+                }
+                return std::string();
+            }, _( "DAMAGE" ) );
+
+            append_cell( []( const item_location & loc ) {
+                const itype *ammo = loc->is_ammo_container() ? loc->first_ammo().ammo_data() :
+                                    loc->ammo_data();
+                if( ammo ) {
+                    const damage_instance &dam = ammo->ammo->damage;
+                    return std::to_string( static_cast<int>( dam.empty() ? 0.0f : ( *dam.begin() ).res_pen ) );
+                }
+                return std::string();
+            }, _( "PIERCE" ) );
+        }
+
+        bool is_shown( const item_location &loc ) const override {
+            // todo: allow to reload a magazine/magazine well from a container pocket on the same item
+            if( loc.parent_item() == target ) {
+                return false;
+            }
+
+            if( loc->made_of( phase_id::LIQUID ) && loc.where() == item_location::type::map ) {
+                map &here = get_map();
+                if( !here.has_flag_ter_or_furn( ter_furn_flag::TFLAG_LIQUIDCONT, loc.pos_bub() ) ) {
+                    return false;
+                }
+            }
+
+            if( loc->is_frozen_liquid() ) {
+                return false;
+            }
+
+            if( !empty && loc->is_magazine() && !loc->ammo_remaining() ) {
+                return false;
+            }
+
+            std::vector<item_location> opts = get_possible_reload_targets( target );
+
+            for( item_location &p : opts ) {
+                if( ( loc->has_flag( flag_SPEEDLOADER ) && p->allows_speedloader( loc->typeId() ) &&
+                      loc->ammo_remaining() > 1 && p->ammo_remaining() < 1 ) && p.can_reload_with( loc, true ) ) {
+                    return true;
+                }
+
+                if( p.can_reload_with( loc, true ) ) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // sort in order of move cost (ascending), then remaining ammo (descending) with empty magazines always last
+        bool sort_compare( const inventory_entry &lhs, const inventory_entry &rhs ) const override {
+            item_location left = lhs.any_item();
+            item_location right = rhs.any_item();
+
+            if( left->ammo_remaining() == 0 || right->ammo_remaining() == 0 ) {
+                return ( left->ammo_remaining() != 0 ) > ( right->ammo_remaining() != 0 );
+            }
+
+            if( left.obtain_cost( you ) != right.obtain_cost( you ) ) {
+                return left.obtain_cost( you ) < right.obtain_cost( you );
+            }
+
+            if( left->ammo_remaining() != right->ammo_remaining() ) {
+                return left->ammo_remaining() > right->ammo_remaining();
+            }
+
+            return inventory_selector_preset::sort_compare( lhs, rhs );
+        }
+
+    private:
+        Character &you;
+        const item_location target;
+        bool empty;
+};
+
+item::reload_option game_menus::inv::select_ammo( Character &you, const item_location &loc,
+        bool prompt, bool empty )
+{
+    const select_ammo_inventory_preset preset( you, loc, empty );
+    ammo_inventory_selector inv_s( you, loc, preset );
+
+    inv_s.set_title( string_format( loc->is_watertight_container() ? _( "Refill %s" ) :
+                                    loc->has_flag( flag_RELOAD_AND_SHOOT ) ? _( "Select ammo for %s" ) : _( "Reload %s" ),
+                                    loc->display_name() ) );
+    inv_s.set_hint( _( "Choose ammo to reload" ) );
+    inv_s.set_display_stats( false );
+
+    inv_s.clear_items();
+    inv_s.add_character_items( you );
+    inv_s.add_nearby_items( 1 );
+    inv_s.set_all_entries_chosen_count();
+
+    if( inv_s.empty() ) {
+        popup( _( "You have nothing to reload." ), PF_GET_KEY );
+        return item::reload_option();
+    }
+
+    drop_location selected;
+    if( !prompt && inv_s.item_entry_count() == 1 ) {
+        selected = inv_s.get_only_choice();
+    } else {
+        selected = inv_s.execute();
+    }
+
+    if( !selected.first ) {
+        return item::reload_option();
+    }
+
+    item_location target_loc;
+    for( const item_location &opt : get_possible_reload_targets( loc ) ) {
+        if( opt.can_reload_with( selected.first, true ) ) {
+            target_loc = opt;
+            break;
+        }
+    }
+
+    item::reload_option opt( &you, target_loc, selected.first );
+    opt.qty( selected.second );
+
+    return opt;
 }

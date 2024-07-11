@@ -16,6 +16,7 @@
       [ "tshirt", 20 ],
       [ "polo_shirt", 20 ],
       [ "dress_shirt", 20 ],
+      [ "denim_shirt", 20 ],
       [ "tank_top", 20 ],
       [ "longshirt", 20 ],
       [ "hoodie", 40 ],
@@ -94,7 +95,7 @@
     "type": "item_group",
     "id": "NC_OPS_cutting",
     "items": [
-      [ "knife_butcher", 20 ],
+      { "item": "knife_huge", "variant": "knife_butcher", "prob": 20 },
       [ "hatchet", 20 ],
       [ "knife_combat", 20 ],
       [ "machete", 20 ],

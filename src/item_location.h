@@ -2,7 +2,6 @@
 #ifndef CATA_SRC_ITEM_LOCATION_H
 #define CATA_SRC_ITEM_LOCATION_H
 
-#include <iosfwd>
 #include <memory>
 #include <string>
 
@@ -10,7 +9,6 @@
 #include "units_fwd.h"
 
 class Character;
-class character_id;
 class JsonObject;
 class JsonOut;
 class item;
@@ -110,6 +108,9 @@ class item_location
         item_location parent_item() const;
         item_pocket *parent_pocket() const;
 
+        /** returns the character whose inventory contains this item, nullptr if none **/
+        Character *carrier() const;
+
         /** returns true if the item is in the inventory of the given character **/
         bool held_by( Character const &who ) const;
 
@@ -152,6 +153,13 @@ class item_location
          * Overflow items into parent pockets recursively
          */
         void overflow();
+
+        /**
+         * returns whether the item can be reloaded with the specified item.
+         * @param ammo item to be loaded in
+         * @param now whether the currently contained ammo/magazine should be taken into account
+         */
+        bool can_reload_with( const item_location &ammo, bool now ) const;
 
     private:
         class impl;

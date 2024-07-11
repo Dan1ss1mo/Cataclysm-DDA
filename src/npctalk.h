@@ -37,7 +37,9 @@ void buy_horse( npc & );
 void buy_cow( npc & );
 void buy_chicken( npc & );
 void bionic_install( npc & );
+void bionic_install_allies( npc & );
 void bionic_remove( npc & );
+void bionic_remove_allies( npc & );
 void dismount( npc & );
 void find_mount( npc & );
 
@@ -45,7 +47,6 @@ void barber_beard( npc & );
 void barber_hair( npc & );
 void buy_haircut( npc & );
 void buy_shave( npc & );
-void morale_chat( npc & );
 void morale_chat_activity( npc & );
 void start_trade( npc & );
 void sort_loot( npc & );

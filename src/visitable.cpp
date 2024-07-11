@@ -373,7 +373,7 @@ VisitResponse item_contents::visit_contents( const std::function<VisitResponse( 
         &func, item *parent )
 {
     for( item_pocket &pocket : contents ) {
-        if( !pocket.is_type( item_pocket::pocket_type::CONTAINER ) ) {
+        if( !pocket.is_type( pocket_type::CONTAINER ) ) {
             // anything that is not CONTAINER is accessible only via its specific accessor
             continue;
         }
@@ -472,10 +472,10 @@ VisitResponse map_cursor::visit_items(
     const std::function<VisitResponse( item *, item * )> &func ) const
 {
     map &here = get_map();
-    tripoint p = pos();
+    tripoint p = pos().raw();
 
     // check furniture pseudo items
-    if( here.furn( p ) != f_null ) {
+    if( here.furn( p ) != furn_str_id::NULL_ID() ) {
         itype_id it_id = here.furn( p )->crafting_pseudo_item;
         if( it_id.is_valid() ) {
             item it( it_id );
@@ -566,6 +566,11 @@ std::list<item> item::remove_items_with( const std::function<bool( const item &e
     }
 
     contents.remove_internal( filter, count, res );
+
+    // updating pockets is only necessary when removing mods,
+    // but no way to determine where something got removed here
+    update_modified_pockets();
+
     return res;
 }
 
@@ -692,7 +697,7 @@ std::list<item> map_cursor::remove_items_with( const
     }
 
     // fetch the appropriate item stack
-    point offset;
+    point_sm_ms offset;
     submap *sub = here.get_submap_at( pos(), offset );
     cata::colony<item> &stack = sub->get_items( offset );
 

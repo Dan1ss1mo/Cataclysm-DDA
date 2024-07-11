@@ -6,11 +6,11 @@
 #include "character.h"
 #include "item.h"
 #include "item_location.h"
-#include "item_pocket.h"
 #include "map.h"
 #include "map_helpers.h"
 #include "map_selector.h"
 #include "player_helpers.h"
+#include "pocket_type.h"
 #include "point.h"
 #include "ret_val.h"
 #include "rng.h"
@@ -31,7 +31,8 @@ TEST_CASE( "item_location_can_maintain_reference_despite_item_removal", "[item][
     m.add_item( pos, item( "tshirt" ) );
     m.add_item( pos, item( "jeans" ) );
     m.add_item( pos, item( "jeans" ) );
-    map_cursor cursor( pos );
+    const tripoint_bub_ms bub = tripoint_bub_ms( pos );
+    map_cursor cursor( bub );
     item *tshirt = nullptr;
     cursor.visit_items( [&tshirt]( item * i, item * ) {
         if( i->typeId() == itype_tshirt ) {
@@ -64,7 +65,7 @@ TEST_CASE( "item_location_doesnt_return_stale_map_item", "[item][item_location]"
     tripoint pos( 60, 60, 0 );
     m.i_clear( pos );
     m.add_item( pos, item( "tshirt" ) );
-    item_location item_loc( map_cursor( pos ), &m.i_at( pos ).only_item() );
+    item_location item_loc( map_cursor( tripoint_bub_ms( pos ) ), &m.i_at( pos ).only_item() );
     REQUIRE( item_loc->typeId() == itype_tshirt );
     m.i_rem( pos, &*item_loc );
     m.add_item( pos, item( "jeans" ) );
@@ -80,7 +81,7 @@ TEST_CASE( "item_in_container", "[item][item_location]" )
 
     REQUIRE( dummy.has_item( *backpack ) );
 
-    backpack->put_in( jeans, item_pocket::pocket_type::CONTAINER );
+    backpack->put_in( jeans, pocket_type::CONTAINER );
 
     item_location backpack_loc( dummy, & **dummy.wear_item( *backpack ) );
 

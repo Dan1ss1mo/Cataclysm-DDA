@@ -15,7 +15,7 @@
 #include "calendar.h"
 #include "clone_ptr.h"
 #include "compatibility.h"
-#include "coordinates.h"
+#include "coords_fwd.h"
 #include "enums.h"
 #include "item_location.h"
 #include "memory_fast.h"
@@ -136,7 +136,7 @@ class player_activity
          * possible if the player start the very same activity (with the same
          * parameters) again.
          */
-        bool is_suspendable() const;
+        bool can_resume() const;
 
         void serialize( JsonOut &json ) const;
         void deserialize( const JsonObject &data );
